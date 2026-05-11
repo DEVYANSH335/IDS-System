@@ -1,0 +1,23 @@
+[
+  "Dst Port",
+  "Protocol",
+  "Fwd Packet Length Min",
+  "Fwd Packet Length Std",
+  "Bwd Packet Length Min",
+  "Bwd Packet Length Mean",
+  "Bwd Packet Length Std",
+  "Bwd IAT Std",
+  "Bwd IAT Max",
+  "Bwd Packets/s",
+  "Packet Length Min",
+  "FIN Flag Count",
+  "SYN Flag Count",
+  "Bwd Segment Size Avg",
+  "Subflow Fwd Packets",
+  "Fwd Seg Size Min",
+  "Idle Mean",
+  "Idle Std",
+  "Idle Max",
+  "Idle Min"
+]
+
