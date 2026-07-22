@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Search, Download, ShieldAlert } from "lucide-react";
 
-import { createDemoAttack, getTrafficAnalysis } from "@/api/idsApi";
+import { createDemoAttack, getPrediction, getTrafficAnalysis } from "@/api/idsApi";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 
@@ -34,6 +35,37 @@ interface TrafficEntry {
   timestamp: string;
 }
 
+interface ManualPredictionResult {
+  prediction: string;
+  probability: number[];
+  confidence?: number;
+  dashboardUpdated?: boolean;
+  dashboardMessage?: string;
+}
+
+const SAMPLE_PAYLOAD = `{
+  "Dst Port": 445,
+  "Protocol": 6,
+  "Fwd Packet Length Min": 79.04,
+  "Fwd Packet Length Std": 51.78,
+  "Bwd Packet Length Min": 54.09,
+  "Bwd Packet Length Mean": 771.86,
+  "Bwd Packet Length Std": 56.27,
+  "Bwd IAT Std": 1645203.26,
+  "Bwd IAT Max": 4092175.67,
+  "Bwd Packets/s": 8362.33,
+  "Packet Length Min": 9.43,
+  "FIN Flag Count": 1,
+  "SYN Flag Count": 0,
+  "Bwd Segment Size Avg": 1208.22,
+  "Subflow Fwd Packets": 1071,
+  "Fwd Seg Size Min": 40,
+  "Idle Mean": 2333984.58,
+  "Idle Std": 855567.25,
+  "Idle Max": 9347025.49,
+  "Idle Min": 2155983.06
+}`;
+
 export default function TrafficAnalysis() {
   const [trafficData, setTrafficData] = useState<TrafficEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -41,6 +73,9 @@ export default function TrafficAnalysis() {
   const [trafficType, setTrafficType] = useState("all");
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
+  const [manualPayload, setManualPayload] = useState(SAMPLE_PAYLOAD);
+  const [manualLoading, setManualLoading] = useState(false);
+  const [manualResult, setManualResult] = useState<ManualPredictionResult | null>(null);
 
   const loadTrafficAnalysis = async () => {
     setLoading(true);
@@ -141,6 +176,34 @@ export default function TrafficAnalysis() {
     }
   };
 
+  const handleManualPredict = async () => {
+    setManualLoading(true);
+
+    try {
+      const parsedPayload = JSON.parse(manualPayload) as Record<string, number>;
+      const result = await getPrediction(parsedPayload);
+      setManualResult(result);
+      await loadTrafficAnalysis();
+
+      toast({
+        title: result.prediction,
+        description:
+          result.dashboardMessage ??
+          (result.prediction === "Intrusion Detected"
+            ? "Malicious traffic was detected and added to the dashboard"
+            : "Traffic was classified as normal"),
+      });
+    } catch (error) {
+      toast({
+        title: "Prediction Failed",
+        description: "Check that the JSON is valid and the backend is running",
+        variant: "destructive",
+      });
+    } finally {
+      setManualLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -199,6 +262,55 @@ export default function TrafficAnalysis() {
             <SelectItem value="Attack">Attack</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-6 gradient-border space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Manual Prediction Test</h2>
+          <p className="text-sm text-muted-foreground">
+            Paste feature JSON, send it to <span className="font-mono">/predict</span>, and show the result here.
+          </p>
+        </div>
+
+        <Textarea
+          value={manualPayload}
+          onChange={(e) => setManualPayload(e.target.value)}
+          className="min-h-[260px] font-mono text-sm"
+        />
+
+        <div className="flex items-center gap-3">
+          <Button onClick={handleManualPredict} disabled={manualLoading}>
+            {manualLoading ? "Classifying..." : "Run Prediction"}
+          </Button>
+          <Button variant="outline" onClick={() => setManualPayload(SAMPLE_PAYLOAD)} disabled={manualLoading}>
+            Load Sample
+          </Button>
+        </div>
+
+        {manualResult && (
+          <div className="rounded-lg border border-border bg-muted/30 p-4">
+            <div className="flex items-center gap-3">
+              <Badge
+                className={cn(
+                  manualResult.prediction === "Intrusion Detected"
+                    ? "bg-destructive/20 text-destructive"
+                    : "bg-success/20 text-success"
+                )}
+              >
+                {manualResult.prediction}
+              </Badge>
+              {typeof manualResult.confidence === "number" && (
+                <span className="text-sm text-muted-foreground">
+                  Confidence: {manualResult.confidence}%
+                </span>
+              )}
+            </div>
+
+            <p className="mt-3 text-sm text-muted-foreground">
+              Raw probabilities: {manualResult.probability.join(", ")}
+            </p>
+          </div>
+        )}
       </div>
 
       <Table>

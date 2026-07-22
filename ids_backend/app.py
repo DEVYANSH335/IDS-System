@@ -5,6 +5,7 @@ import joblib
 import json
 import os
 import threading
+import time
 from utils.flow_extractor import attack_sources
 
 from utils.preprocess import preprocess_input
@@ -162,15 +163,68 @@ async def predict(request: Request):
         )
 
         prediction = model.predict(processed_data)[0]
+        is_intrusion = prediction == 1
 
         if hasattr(model, "predict_proba"):
             probability = model.predict_proba(processed_data)[0].tolist()
         else:
             probability = []
 
+        confidence = 0
+        if probability:
+            confidence = round((probability[1] if is_intrusion else probability[0]) * 100)
+
+        timestamp = time.strftime("%H:%M:%S")
+        source = str(data_obj.get("Source IP", "Manual API Request"))
+        dst_port = data_obj.get("Dst Port", "unknown")
+        protocol_map = {
+            1: "ICMP",
+            6: "TCP",
+            17: "UDP",
+        }
+        protocol = protocol_map.get(data_obj.get("Protocol"), str(data_obj.get("Protocol", "Unknown")))
+        flow_duration = round(float(data_obj.get("Flow Duration", 0)) / 1_000_000, 2)
+        packet_rate = round(float(data_obj.get("Bwd Packets/s", data_obj.get("Flow Packets/s", 0))), 2)
+
+        traffic_analysis.insert(0, {
+            "id": str(time.time_ns()),
+            "flowId": f"{source}->{request.client.host if request.client else 'backend'}:{dst_port}",
+            "protocol": protocol,
+            "packetRate": packet_rate,
+            "flowDuration": flow_duration,
+            "prediction": "Attack" if is_intrusion else "Normal",
+            "confidence": confidence,
+            "timestamp": timestamp
+        })
+
+        if len(traffic_analysis) > 200:
+            traffic_analysis.pop()
+
+        if is_intrusion:
+            traffic_distribution["malicious"] += 1
+
+            alerts.append({
+                "id": str(time.time_ns()),
+                "type": "critical",
+                "message": f"Intrusion Detected (confidence: {confidence}%)",
+                "source": source,
+                "timestamp": timestamp
+            })
+
+            attack_sources[source] = attack_sources.get(source, 0) + 1
+        else:
+            traffic_distribution["normal"] += 1
+
         return {
-            "prediction": "Intrusion Detected" if prediction == 1 else "Normal Traffic",
-            "probability": probability
+            "prediction": "Intrusion Detected" if is_intrusion else "Normal Traffic",
+            "probability": probability,
+            "confidence": confidence,
+            "dashboardUpdated": True,
+            "dashboardMessage": (
+                "Intrusion was added to dashboard alerts, traffic analysis, and malicious traffic stats"
+                if is_intrusion
+                else "Prediction was added to traffic analysis and normal traffic stats"
+            )
         }
 
     except Exception as e:
